@@ -1,4 +1,4 @@
-FROM golang:1.18.1 as builder
+FROM golang:1.18.4 as builder
 ARG VERSION
 ARG GIT_COMMIT
 ARG DATE
