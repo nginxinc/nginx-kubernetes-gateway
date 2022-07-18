@@ -65,7 +65,7 @@ jobs:
         with:
           go-version: ${{ needs.vars.outputs.go_version }}
       - name: Lint Code
-        uses: golangci/golangci-lint-action@v3.1.0
+        uses: golangci/golangci-lint-action@v3.2.0
         with:
           args: --timeout ${{ env.GOLANGCI_TIMEOUT }}
 
