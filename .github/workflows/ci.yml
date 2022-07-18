@@ -3,7 +3,8 @@ name: Continuous Integration
 on:
   push:
     branches:
-      - 'main'
+      - main
+      - release-*
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
     paths-ignore:
@@ -52,7 +53,6 @@ jobs:
           echo "::set-output name=git_tag::$(echo ${GITHUB_REF/refs\/tags\//} | tr -d v)"
           echo "::set-output name=version::$(grep "VERSION = " Makefile | cut -d " " -f 3)"
           echo "::set-output name=date::$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-
   lint:
     name: Lint
     runs-on: ubuntu-20.04
@@ -89,7 +89,6 @@ jobs:
           echo "The following files are not formatted:"
           echo "${{steps.prettier-run.outputs.prettier_output}}"
           echo "Run \"make njs-fmt\" locally to format the code"
-
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-20.04
@@ -104,11 +103,11 @@ jobs:
       - name: Run Tests
         run: make unit-test
       - name: Upload Coverage Report
+        if: ${{ !startsWith(github.ref, 'refs/heads/release') }}
         uses: actions/upload-artifact@v3
         with:
           name: cover-${{ needs.vars.outputs.sha }}.html
           path: ${{ github.workspace }}/cover.html
-        if: always()
 
   njs-unit-tests:
     name: NJS Unit Tests
@@ -156,16 +155,32 @@ jobs:
           key: nginx-kubernetes-gateway-${{ github.run_id }}-${{ github.run_number }}
       - name: Docker Buildx
         uses: docker/setup-buildx-action@v1
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        if: ${{ startsWith(github.ref, 'refs/tags') }}
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: |
+            name=ghcr.io/nginxinc/nginx-kubernetes-gateway
+          tags: |
+            type=semver,pattern={{version}}
       - name: Build Image Debian
         uses: docker/build-push-action@v2
         with:
           file: build/Dockerfile
           context: '.'
           target: local
-          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          load: ${{ !startsWith(github.ref, 'refs/tags') }}
+          push: ${{ startsWith(github.ref, 'refs/tags') }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          tags: nginx/nginx-kubernetes-gateway:${{ needs.vars.outputs.sha }}
           build-args: |
             VERSION=${{ needs.vars.outputs.version }}
             GIT_COMMIT=${{ needs.vars.outputs.sha }}
@@ -181,13 +196,14 @@ jobs:
           ignore-unfixed: 'true'
       - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v1
+        if: ${{ !startsWith(github.ref, 'refs/heads/release') }}
         continue-on-error: true
         with:
           sarif_file: 'trivy-results-nginx-kubernetes-gateway.sarif'
       - name: Upload Scan Results
         uses: actions/upload-artifact@v3
+        if: ${{ !startsWith(github.ref, 'refs/heads/release') }}
         continue-on-error: true
         with:
           name: 'trivy-results-nginx-kubernetes-gateway.sarif'
           path: 'trivy-results-nginx-kubernetes-gateway.sarif'
-        if: always()
