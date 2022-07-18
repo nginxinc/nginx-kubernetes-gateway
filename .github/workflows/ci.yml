@@ -167,7 +167,7 @@ jobs:
         uses: docker/metadata-action@v4
         with:
           images: |
-            name=ghcr.io/pammecrandall/nginx-kubernetes-gateway
+            name=ghcr.io/nginxinc/nginx-kubernetes-gateway
           tags: |
             type=semver,pattern={{version}}
       - name: Build Image Debian
