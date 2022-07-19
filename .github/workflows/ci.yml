@@ -103,7 +103,6 @@ jobs:
       - name: Run Tests
         run: make unit-test
       - name: Upload Coverage Report
-        if: ${{ !startsWith(github.ref, 'refs/heads/release') }}
         uses: actions/upload-artifact@v3
         with:
           name: cover-${{ needs.vars.outputs.sha }}.html
@@ -196,13 +195,11 @@ jobs:
           ignore-unfixed: 'true'
       - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v1
-        if: ${{ !startsWith(github.ref, 'refs/heads/release') }}
         continue-on-error: true
         with:
           sarif_file: 'trivy-results-nginx-kubernetes-gateway.sarif'
       - name: Upload Scan Results
         uses: actions/upload-artifact@v3
-        if: ${{ !startsWith(github.ref, 'refs/heads/release') }}
         continue-on-error: true
         with:
           name: 'trivy-results-nginx-kubernetes-gateway.sarif'
