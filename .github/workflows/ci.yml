@@ -38,7 +38,6 @@ jobs:
       git_tag: ${{ steps.vars.outputs.git_tag }}
       version: ${{ steps.vars.outputs.version }}
       date: ${{ steps.vars.outputs.date }}
-      trivy-image: ${{ steps.vars.outputs.trivy-image }}
     steps:
       - name: Cancel Previous Runs
         uses: styfle/cancel-workflow-action@0.9.1
