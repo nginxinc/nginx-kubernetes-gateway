@@ -38,7 +38,7 @@ jobs:
       git_tag: ${{ steps.vars.outputs.git_tag }}
       version: ${{ steps.vars.outputs.version }}
       date: ${{ steps.vars.outputs.date }}
-      trivy_image ${{ steps.vars.outputs.trivy_image }}
+      trivy_image: ${{ steps.vars.outputs.trivy_image }}
     steps:
       - name: Cancel Previous Runs
         uses: styfle/cancel-workflow-action@0.9.1
@@ -57,7 +57,7 @@ jobs:
           if ${{ startsWith(github.ref, 'refs/tags/') }}; then
               trivy_image=ghcr.io/nginxinc/nginx-kubernetes-gateway:${{ steps.meta.outputs.tags }}
           else
-              trivy_image=nginx/nginx-kubernetes-gateway:${{ steps.vars.outputs.sha }}
+              trivy_image=nginx/nginx-kubernetes-gateway:${{ needs.vars.outputs.sha }}
           fi
   lint:
     name: Lint
