@@ -38,7 +38,6 @@ jobs:
       git_tag: ${{ steps.vars.outputs.git_tag }}
       version: ${{ steps.vars.outputs.version }}
       date: ${{ steps.vars.outputs.date }}
-      trivy-image-tag: ${{ steps.vars.outputs.trivy-image-tag }}
     steps:
       - name: Cancel Previous Runs
         uses: styfle/cancel-workflow-action@0.9.1
@@ -54,11 +53,6 @@ jobs:
           echo "::set-output name=git_tag::$(echo ${GITHUB_REF/refs\/tags\//} | tr -d v)"
           echo "::set-output name=version::$(grep "VERSION = " Makefile | cut -d " " -f 3)"
           echo "::set-output name=date::$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-          if ${{ startsWith(github.ref, 'refs/tags/') }}; then
-              echo "::set-output name=trivy-image-tag=ghcr.io/nginxinc/nginx-kubernetes-gateway:${{ steps.meta.outputs.tags }}"
-          else
-              echo "::set-output name=trivy-image-tag=nginx/nginx-kubernetes-gateway:$(echo ${GITHUB_SHA} | cut -c1-7)"
-          fi
   lint:
     name: Lint
     runs-on: ubuntu-20.04
@@ -190,23 +184,3 @@ jobs:
             VERSION=${{ needs.vars.outputs.version }}
             GIT_COMMIT=${{ needs.vars.outputs.sha }}
             DATE=${{ needs.vars.outputs.date }}
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.2.3
-        continue-on-error: true
-        with:
-          image-ref: ghcr.io/nginxinc/nginx-kubernetes-gateway:${{ steps.vars.outputs.trivy-image-tag }}
-          format: 'template'
-          template: '@/contrib/sarif.tpl'
-          output: 'trivy-results-nginx-kubernetes-gateway.sarif'
-          ignore-unfixed: 'true'
-      - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v1
-        continue-on-error: true
-        with:
-          sarif_file: 'trivy-results-nginx-kubernetes-gateway.sarif'
-      - name: Upload Scan Results
-        uses: actions/upload-artifact@v3
-        continue-on-error: true
-        with:
-          name: 'trivy-results-nginx-kubernetes-gateway.sarif'
-          path: 'trivy-results-nginx-kubernetes-gateway.sarif'
