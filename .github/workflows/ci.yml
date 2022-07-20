@@ -53,6 +53,7 @@ jobs:
           echo "::set-output name=git_tag::$(echo ${GITHUB_REF/refs\/tags\//} | tr -d v)"
           echo "::set-output name=version::$(grep "VERSION = " Makefile | cut -d " " -f 3)"
           echo "::set-output name=date::$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
   lint:
     name: Lint
     runs-on: ubuntu-20.04
@@ -89,6 +90,7 @@ jobs:
           echo "The following files are not formatted:"
           echo "${{steps.prettier-run.outputs.prettier_output}}"
           echo "Run \"make njs-fmt\" locally to format the code"
+
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-20.04
@@ -107,6 +109,7 @@ jobs:
         with:
           name: cover-${{ needs.vars.outputs.sha }}.html
           path: ${{ github.workspace }}/cover.html
+        if: always()
 
   njs-unit-tests:
     name: NJS Unit Tests
@@ -180,7 +183,29 @@ jobs:
           push: ${{ startsWith(github.ref, 'refs/tags') }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          tags: nginx/nginx-kubernetes-gateway:${{ needs.vars.outputs.sha }}
           build-args: |
             VERSION=${{ needs.vars.outputs.version }}
             GIT_COMMIT=${{ needs.vars.outputs.sha }}
             DATE=${{ needs.vars.outputs.date }}
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.2.3
+        continue-on-error: true
+        with:
+          image-ref: nginx/nginx-kubernetes-gateway:${{ needs.vars.outputs.sha }}
+          format: 'template'
+          template: '@/contrib/sarif.tpl'
+          output: 'trivy-results-nginx-kubernetes-gateway.sarif'
+          ignore-unfixed: 'true'
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v1
+        continue-on-error: true
+        with:
+          sarif_file: 'trivy-results-nginx-kubernetes-gateway.sarif'
+      - name: Upload Scan Results
+        uses: actions/upload-artifact@v3
+        continue-on-error: true
+        with:
+          name: 'trivy-results-nginx-kubernetes-gateway.sarif'
+          path: 'trivy-results-nginx-kubernetes-gateway.sarif'
+        if: always()
