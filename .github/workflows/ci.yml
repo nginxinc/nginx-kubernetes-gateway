@@ -170,9 +170,10 @@ jobs:
         with:
           images: |
             name=ghcr.io/nginxinc/nginx-kubernetes-gateway
+            name=nginx/nginx-kubernetes-gateway
           tags: |
             type=semver,pattern={{version}}
-            type=edge
+            type=edge={{ needs.vars.outputs.sha }}
       - name: Build Image Debian
         uses: docker/build-push-action@v2
         with:
