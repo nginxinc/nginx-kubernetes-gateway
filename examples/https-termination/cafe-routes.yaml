@@ -1,26 +1,11 @@
 apiVersion: gateway.networking.k8s.io/v1alpha2
 kind: HTTPRoute
 metadata:
-  name: cafe
-spec:
-  parentRefs:
-  - name: gateway
-    sectionName: http
-  hostnames:
-  - "cafe.example.com"
-  rules:
-  - backendRefs:
-    - name: main
-      port: 80
----
-apiVersion: gateway.networking.k8s.io/v1alpha2
-kind: HTTPRoute
-metadata:
   name: coffee
 spec:
   parentRefs:
   - name: gateway
-    sectionName: http
+    sectionName: https
   hostnames:
   - "cafe.example.com"
   rules:
@@ -39,7 +24,7 @@ metadata:
 spec:
   parentRefs:
   - name: gateway
-    sectionName: http
+    sectionName: https
   hostnames:
   - "cafe.example.com"
   rules:

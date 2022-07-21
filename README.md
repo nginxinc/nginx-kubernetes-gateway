@@ -93,11 +93,6 @@ You can deploy NGINX Kubernetes Gateway on an existing Kubernetes 1.16+ cluster.
    NAME                             READY   STATUS    RESTARTS   AGE
    nginx-gateway-5d4f4c7db7-xk2kq   2/2     Running   0          112s
    ```
-1. Create the Gateway resource:
-
-   ```
-   kubectl apply -f deploy/manifests/gateway.yaml
-   ```
 
 ## Expose NGINX Kubernetes Gateway
 

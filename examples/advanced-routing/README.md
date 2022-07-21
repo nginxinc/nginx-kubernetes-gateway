@@ -46,6 +46,12 @@ The cafe application consists of four services: `coffee-v1-svc`, `coffee-v2-svc`
 
 ## 3. Configure Routing
 
+1. Create the `Gateway`:
+   
+   ```
+   kubectl apply -f gateway.yaml
+   ```
+   
 1. Create the `HTTPRoute` resources:
 
    ```

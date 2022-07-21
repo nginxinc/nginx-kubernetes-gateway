@@ -12,7 +12,7 @@ import (
 )
 
 func TestBuildConfiguration(t *testing.T) {
-	createRoute := func(name string, hostname string, paths ...string) *v1alpha2.HTTPRoute {
+	createRoute := func(name string, hostname string, listenerName string, paths ...string) *v1alpha2.HTTPRoute {
 		rules := make([]v1alpha2.HTTPRouteRule, 0, len(paths))
 		for _, p := range paths {
 			rules = append(rules, v1alpha2.HTTPRouteRule{
@@ -36,7 +36,7 @@ func TestBuildConfiguration(t *testing.T) {
 						{
 							Namespace:   (*v1alpha2.Namespace)(helpers.GetStringPointer("test")),
 							Name:        "gateway",
-							SectionName: (*v1alpha2.SectionName)(helpers.GetStringPointer("listener-80-1")),
+							SectionName: (*v1alpha2.SectionName)(helpers.GetStringPointer(listenerName)),
 						},
 					},
 				},
@@ -48,7 +48,7 @@ func TestBuildConfiguration(t *testing.T) {
 		}
 	}
 
-	hr1 := createRoute("hr-1", "foo.example.com", "/")
+	hr1 := createRoute("hr-1", "foo.example.com", "listener-80-1", "/")
 
 	routeHR1 := &route{
 		Source: hr1,
@@ -58,7 +58,7 @@ func TestBuildConfiguration(t *testing.T) {
 		InvalidSectionNameRefs: map[string]struct{}{},
 	}
 
-	hr2 := createRoute("hr-2", "bar.example.com", "/")
+	hr2 := createRoute("hr-2", "bar.example.com", "listener-80-1", "/")
 
 	routeHR2 := &route{
 		Source: hr2,
@@ -68,7 +68,27 @@ func TestBuildConfiguration(t *testing.T) {
 		InvalidSectionNameRefs: map[string]struct{}{},
 	}
 
-	hr3 := createRoute("hr-3", "foo.example.com", "/", "/third")
+	httpsHR1 := createRoute("https-hr-1", "foo.example.com", "listener-443-1", "/")
+
+	httpsRouteHR1 := &route{
+		Source: httpsHR1,
+		ValidSectionNameRefs: map[string]struct{}{
+			"listener-443-1": {},
+		},
+		InvalidSectionNameRefs: map[string]struct{}{},
+	}
+
+	httpsHR2 := createRoute("https-hr-2", "bar.example.com", "listener-443-1", "/")
+
+	httpsRouteHR2 := &route{
+		Source: httpsHR2,
+		ValidSectionNameRefs: map[string]struct{}{
+			"listener-443-1": {},
+		},
+		InvalidSectionNameRefs: map[string]struct{}{},
+	}
+
+	hr3 := createRoute("hr-3", "foo.example.com", "listener-80-1", "/", "/third")
 
 	routeHR3 := &route{
 		Source: hr3,
@@ -78,7 +98,17 @@ func TestBuildConfiguration(t *testing.T) {
 		InvalidSectionNameRefs: map[string]struct{}{},
 	}
 
-	hr4 := createRoute("hr-4", "foo.example.com", "/fourth", "/")
+	httpsHR3 := createRoute("https-hr-3", "foo.example.com", "listener-443-1", "/", "/third")
+
+	httpsRouteHR3 := &route{
+		Source: httpsHR3,
+		ValidSectionNameRefs: map[string]struct{}{
+			"listener-443-1": {},
+		},
+		InvalidSectionNameRefs: map[string]struct{}{},
+	}
+
+	hr4 := createRoute("hr-4", "foo.example.com", "listener-80-1", "/fourth", "/")
 
 	routeHR4 := &route{
 		Source: hr4,
@@ -87,6 +117,51 @@ func TestBuildConfiguration(t *testing.T) {
 		},
 		InvalidSectionNameRefs: map[string]struct{}{},
 	}
+
+	httpsHR4 := createRoute("https-hr-4", "foo.example.com", "listener-443-1", "/fourth", "/")
+
+	httpsRouteHR4 := &route{
+		Source: httpsHR4,
+		ValidSectionNameRefs: map[string]struct{}{
+			"listener-80-1": {},
+		},
+		InvalidSectionNameRefs: map[string]struct{}{},
+	}
+
+	listener80 := v1alpha2.Listener{
+		Name:     "listener-80-1",
+		Hostname: nil,
+		Port:     80,
+		Protocol: v1alpha2.HTTPProtocolType,
+	}
+
+	listener443 := v1alpha2.Listener{
+		Name:     "listener-443-1",
+		Hostname: nil,
+		Port:     443,
+		Protocol: v1alpha2.HTTPSProtocolType,
+		TLS: &v1alpha2.GatewayTLSConfig{
+			Mode: helpers.GetTLSModePointer(v1alpha2.TLSModeTerminate),
+			CertificateRefs: []*v1alpha2.SecretObjectReference{
+				{
+					Kind:      (*v1alpha2.Kind)(helpers.GetStringPointer("Secret")),
+					Name:      "secret",
+					Namespace: (*v1alpha2.Namespace)(helpers.GetStringPointer("test")),
+				},
+			},
+		},
+	}
+
+	invalidListener := v1alpha2.Listener{
+		Name:     "invalid-listener",
+		Hostname: nil,
+		Port:     443,
+		Protocol: v1alpha2.HTTPSProtocolType,
+		TLS:      nil, // missing TLS config
+	}
+
+	// nolint:gosec
+	secretPath := "/etc/nginx/secrets/secret"
 
 	tests := []struct {
 		graph    *graph
@@ -106,7 +181,8 @@ func TestBuildConfiguration(t *testing.T) {
 				Routes: map[types.NamespacedName]*route{},
 			},
 			expected: Configuration{
-				HTTPServers: []HTTPServer{},
+				HTTPServers: []VirtualServer{},
+				SSLServers:  []VirtualServer{},
 			},
 			msg: "no listeners and routes",
 		},
@@ -120,18 +196,62 @@ func TestBuildConfiguration(t *testing.T) {
 					Source: &v1alpha2.Gateway{},
 					Listeners: map[string]*listener{
 						"listener-80-1": {
+							Source:            listener80,
 							Valid:             true,
 							Routes:            map[types.NamespacedName]*route{},
 							AcceptedHostnames: map[string]struct{}{},
+						},
+						"listener-443-1": {
+							Source:            listener443,
+							Valid:             true,
+							Routes:            map[types.NamespacedName]*route{},
+							AcceptedHostnames: map[string]struct{}{},
+							SecretPath:        secretPath,
 						},
 					},
 				},
 				Routes: map[types.NamespacedName]*route{},
 			},
 			expected: Configuration{
-				HTTPServers: []HTTPServer{},
+				HTTPServers: []VirtualServer{},
+				SSLServers:  []VirtualServer{},
 			},
-			msg: "listener with no routes",
+			msg: "http and https listeners with no routes",
+		},
+		{
+			graph: &graph{
+				GatewayClass: &gatewayClass{
+					Source: &v1alpha2.GatewayClass{},
+					Valid:  true,
+				},
+				Gateway: &gateway{
+					Source: &v1alpha2.Gateway{},
+					Listeners: map[string]*listener{
+						"invalid-listener": {
+							Source: invalidListener,
+							Valid:  false,
+							Routes: map[types.NamespacedName]*route{
+								{Namespace: "test", Name: "https-hr-1"}: httpsRouteHR1,
+								{Namespace: "test", Name: "https-hr-2"}: httpsRouteHR2,
+							},
+							AcceptedHostnames: map[string]struct{}{
+								"foo.example.com": {},
+								"bar.example.com": {},
+							},
+							SecretPath: "",
+						},
+					},
+				},
+				Routes: map[types.NamespacedName]*route{
+					{Namespace: "test", Name: "https-hr-1"}: httpsRouteHR1,
+					{Namespace: "test", Name: "https-hr-2"}: httpsRouteHR2,
+				},
+			},
+			expected: Configuration{
+				HTTPServers: []VirtualServer{},
+				SSLServers:  []VirtualServer{},
+			},
+			msg: "invalid listener",
 		},
 		{
 			graph: &graph{
@@ -143,7 +263,8 @@ func TestBuildConfiguration(t *testing.T) {
 					Source: &v1alpha2.Gateway{},
 					Listeners: map[string]*listener{
 						"listener-80-1": {
-							Valid: true,
+							Source: listener80,
+							Valid:  true,
 							Routes: map[types.NamespacedName]*route{
 								{Namespace: "test", Name: "hr-1"}: routeHR1,
 								{Namespace: "test", Name: "hr-2"}: routeHR2,
@@ -153,15 +274,30 @@ func TestBuildConfiguration(t *testing.T) {
 								"bar.example.com": {},
 							},
 						},
+						"listener-443-1": {
+							Source:     listener443,
+							Valid:      true,
+							SecretPath: secretPath,
+							Routes: map[types.NamespacedName]*route{
+								{Namespace: "test", Name: "https-hr-1"}: httpsRouteHR1,
+								{Namespace: "test", Name: "https-hr-2"}: httpsRouteHR2,
+							},
+							AcceptedHostnames: map[string]struct{}{
+								"foo.example.com": {},
+								"bar.example.com": {},
+							},
+						},
 					},
 				},
 				Routes: map[types.NamespacedName]*route{
-					{Namespace: "test", Name: "hr-1"}: routeHR1,
-					{Namespace: "test", Name: "hr-2"}: routeHR2,
+					{Namespace: "test", Name: "hr-1"}:       routeHR1,
+					{Namespace: "test", Name: "hr-2"}:       routeHR2,
+					{Namespace: "test", Name: "https-hr-1"}: httpsRouteHR1,
+					{Namespace: "test", Name: "https-hr-2"}: httpsRouteHR2,
 				},
 			},
 			expected: Configuration{
-				HTTPServers: []HTTPServer{
+				HTTPServers: []VirtualServer{
 					{
 						Hostname: "bar.example.com",
 						PathRules: []PathRule{
@@ -193,8 +329,46 @@ func TestBuildConfiguration(t *testing.T) {
 						},
 					},
 				},
+				SSLServers: []VirtualServer{
+					{
+						Hostname: "bar.example.com",
+						PathRules: []PathRule{
+							{
+								Path: "/",
+								MatchRules: []MatchRule{
+									{
+										MatchIdx: 0,
+										RuleIdx:  0,
+										Source:   httpsHR2,
+									},
+								},
+							},
+						},
+						SSL: &SSL{
+							CertificatePath: secretPath,
+						},
+					},
+					{
+						Hostname: "foo.example.com",
+						PathRules: []PathRule{
+							{
+								Path: "/",
+								MatchRules: []MatchRule{
+									{
+										MatchIdx: 0,
+										RuleIdx:  0,
+										Source:   httpsHR1,
+									},
+								},
+							},
+						},
+						SSL: &SSL{
+							CertificatePath: secretPath,
+						},
+					},
+				},
 			},
-			msg: "one listener with two routes for different hostnames",
+			msg: "one http and one https listener each with two routes for different hostnames",
 		},
 		{
 			graph: &graph{
@@ -206,7 +380,8 @@ func TestBuildConfiguration(t *testing.T) {
 					Source: &v1alpha2.Gateway{},
 					Listeners: map[string]*listener{
 						"listener-80-1": {
-							Valid: true,
+							Source: listener80,
+							Valid:  true,
 							Routes: map[types.NamespacedName]*route{
 								{Namespace: "test", Name: "hr-3"}: routeHR3,
 								{Namespace: "test", Name: "hr-4"}: routeHR4,
@@ -215,15 +390,29 @@ func TestBuildConfiguration(t *testing.T) {
 								"foo.example.com": {},
 							},
 						},
+						"listener-443-1": {
+							Source:     listener443,
+							Valid:      true,
+							SecretPath: secretPath,
+							Routes: map[types.NamespacedName]*route{
+								{Namespace: "test", Name: "https-hr-3"}: httpsRouteHR3,
+								{Namespace: "test", Name: "https-hr-4"}: httpsRouteHR4,
+							},
+							AcceptedHostnames: map[string]struct{}{
+								"foo.example.com": {},
+							},
+						},
 					},
 				},
 				Routes: map[types.NamespacedName]*route{
-					{Namespace: "test", Name: "hr-3"}: routeHR3,
-					{Namespace: "test", Name: "hr-4"}: routeHR4,
+					{Namespace: "test", Name: "hr-3"}:       routeHR3,
+					{Namespace: "test", Name: "hr-4"}:       routeHR4,
+					{Namespace: "test", Name: "https-hr-3"}: httpsRouteHR3,
+					{Namespace: "test", Name: "https-hr-4"}: httpsRouteHR4,
 				},
 			},
 			expected: Configuration{
-				HTTPServers: []HTTPServer{
+				HTTPServers: []VirtualServer{
 					{
 						Hostname: "foo.example.com",
 						PathRules: []PathRule{
@@ -265,8 +454,53 @@ func TestBuildConfiguration(t *testing.T) {
 						},
 					},
 				},
+				SSLServers: []VirtualServer{
+					{
+						Hostname: "foo.example.com",
+						SSL: &SSL{
+							CertificatePath: secretPath,
+						},
+						PathRules: []PathRule{
+							{
+								Path: "/",
+								MatchRules: []MatchRule{
+									{
+										MatchIdx: 0,
+										RuleIdx:  0,
+										Source:   httpsHR3,
+									},
+									{
+										MatchIdx: 0,
+										RuleIdx:  1,
+										Source:   httpsHR4,
+									},
+								},
+							},
+							{
+								Path: "/fourth",
+								MatchRules: []MatchRule{
+									{
+										MatchIdx: 0,
+										RuleIdx:  0,
+										Source:   httpsHR4,
+									},
+								},
+							},
+							{
+								Path: "/third",
+								MatchRules: []MatchRule{
+									{
+										MatchIdx: 0,
+										RuleIdx:  1,
+										Source:   httpsHR3,
+									},
+								},
+							},
+						},
+					},
+				},
 			},
-			msg: "one listener with two routes with the same hostname with and without collisions",
+			msg: "one http and one https listener with two routes with the same hostname with and without collisions",
 		},
 		{
 			graph: &graph{
@@ -279,7 +513,8 @@ func TestBuildConfiguration(t *testing.T) {
 					Source: &v1alpha2.Gateway{},
 					Listeners: map[string]*listener{
 						"listener-80-1": {
-							Valid: true,
+							Source: listener80,
+							Valid:  true,
 							Routes: map[types.NamespacedName]*route{
 								{Namespace: "test", Name: "hr-1"}: routeHR1,
 							},
@@ -303,7 +538,8 @@ func TestBuildConfiguration(t *testing.T) {
 					Source: &v1alpha2.Gateway{},
 					Listeners: map[string]*listener{
 						"listener-80-1": {
-							Valid: true,
+							Source: listener80,
+							Valid:  true,
 							Routes: map[types.NamespacedName]*route{
 								{Namespace: "test", Name: "hr-1"}: routeHR1,
 							},

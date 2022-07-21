@@ -15,39 +15,38 @@ import (
 	"github.com/nginxinc/nginx-kubernetes-gateway/internal/status"
 )
 
+// EventLoopConfig holds configuration parameters for EventLoop.
+type EventLoopConfig struct {
+	// Processor is the state ChangeProcessor.
+	Processor state.ChangeProcessor
+	// ServiceStore is the state ServiceStore.
+	ServiceStore state.ServiceStore
+	// SecretStore is the state SecretStore.
+	SecretStore state.SecretStore
+	// SecretMemoryManager is the state SecretMemoryManager.
+	SecretMemoryManager state.SecretDiskMemoryManager
+	// Generator is the nginx config Generator.
+	Generator config.Generator
+	// EventCh is a read-only channel for events.
+	EventCh <-chan interface{}
+	// Logger is the logger to be used by the EventLoop.
+	Logger logr.Logger
+	// NginxFileMgr is the file Manager for nginx.
+	NginxFileMgr file.Manager
+	// NginxRuntimeMgr manages nginx runtime.
+	NginxRuntimeMgr runtime.Manager
+	// StatusUpdater updates statuses on Kubernetes resources.
+	StatusUpdater status.Updater
+}
+
 // EventLoop is the main event loop of the Gateway.
 type EventLoop struct {
-	processor       state.ChangeProcessor
-	serviceStore    state.ServiceStore
-	generator       config.Generator
-	eventCh         <-chan interface{}
-	logger          logr.Logger
-	nginxFileMgr    file.Manager
-	nginxRuntimeMgr runtime.Manager
-	statusUpdater   status.Updater
+	cfg EventLoopConfig
 }
 
 // NewEventLoop creates a new EventLoop.
-func NewEventLoop(
-	processor state.ChangeProcessor,
-	serviceStore state.ServiceStore,
-	generator config.Generator,
-	eventCh <-chan interface{},
-	logger logr.Logger,
-	nginxFileMgr file.Manager,
-	nginxRuntimeMgr runtime.Manager,
-	statusUpdater status.Updater,
-) *EventLoop {
-	return &EventLoop{
-		processor:       processor,
-		serviceStore:    serviceStore,
-		generator:       generator,
-		eventCh:         eventCh,
-		logger:          logger.WithName("eventLoop"),
-		nginxFileMgr:    nginxFileMgr,
-		nginxRuntimeMgr: nginxRuntimeMgr,
-		statusUpdater:   statusUpdater,
-	}
+func NewEventLoop(cfg EventLoopConfig) *EventLoop {
+	return &EventLoop{cfg: cfg}
 }
 
 // Start starts the EventLoop.
@@ -61,7 +60,7 @@ func (el *EventLoop) Start(ctx context.Context) error {
 			// although we always return nil, Start must return it to satisfy
 			// "sigs.k8s.io/controller-runtime/pkg/manager".Runnable
 			return nil
-		case e := <-el.eventCh:
+		case e := <-el.cfg.EventCh:
 			el.handleEvent(ctx, e)
 		}
 	}
@@ -78,26 +77,34 @@ func (el *EventLoop) handleEvent(ctx context.Context, event interface{}) {
 		panic(fmt.Errorf("unknown event type %T", e))
 	}
 
-	changed, conf, statuses := el.processor.Process()
+	changed, conf, statuses := el.cfg.Processor.Process()
 	if !changed {
 		return
 	}
 
 	err := el.updateNginx(ctx, conf)
 	if err != nil {
-		el.logger.Error(err, "Failed to update NGINX configuration")
+		el.cfg.Logger.Error(err, "Failed to update NGINX configuration")
 	}
 
-	el.statusUpdater.Update(ctx, statuses)
+	el.cfg.StatusUpdater.Update(ctx, statuses)
 }
 
 func (el *EventLoop) updateNginx(ctx context.Context, conf state.Configuration) error {
-	cfg, warnings := el.generator.Generate(conf)
+	// Write all secrets (nuke and pave).
+	// This will remove all secrets in the secrets directory before writing the requested secrets.
+	// FIXME(kate-osborn): We may want to rethink this approach in the future and write and remove secrets individually.
+	err := el.cfg.SecretMemoryManager.WriteAllRequestedSecrets()
+	if err != nil {
+		return err
+	}
+
+	cfg, warnings := el.cfg.Generator.Generate(conf)
 
 	// For now, we keep all http servers in one config
 	// We might rethink that. For example, we can write each server to its file
 	// or group servers in some way.
-	err := el.nginxFileMgr.WriteHTTPServersConfig("http-servers", cfg)
+	err = el.cfg.NginxFileMgr.WriteHTTPServersConfig("http-servers", cfg)
 	if err != nil {
 		return err
 	}
@@ -105,7 +112,7 @@ func (el *EventLoop) updateNginx(ctx context.Context, conf state.Configuration) 
 	for obj, objWarnings := range warnings {
 		for _, w := range objWarnings {
 			// FIXME(pleshakov): report warnings via Object status
-			el.logger.Info("got warning while generating config",
+			el.cfg.Logger.Info("got warning while generating config",
 				"kind", obj.GetObjectKind().GroupVersionKind().Kind,
 				"namespace", obj.GetNamespace(),
 				"name", obj.GetName(),
@@ -113,20 +120,23 @@ func (el *EventLoop) updateNginx(ctx context.Context, conf state.Configuration) 
 		}
 	}
 
-	return el.nginxRuntimeMgr.Reload(ctx)
+	return el.cfg.NginxRuntimeMgr.Reload(ctx)
 }
 
 func (el *EventLoop) propagateUpsert(e *UpsertEvent) {
 	switch r := e.Resource.(type) {
 	case *v1alpha2.GatewayClass:
-		el.processor.CaptureUpsertChange(r)
+		el.cfg.Processor.CaptureUpsertChange(r)
 	case *v1alpha2.Gateway:
-		el.processor.CaptureUpsertChange(r)
+		el.cfg.Processor.CaptureUpsertChange(r)
 	case *v1alpha2.HTTPRoute:
-		el.processor.CaptureUpsertChange(r)
+		el.cfg.Processor.CaptureUpsertChange(r)
 	case *apiv1.Service:
 		// FIXME(pleshakov): make sure the affected hosts are updated
-		el.serviceStore.Upsert(r)
+		el.cfg.ServiceStore.Upsert(r)
+	case *apiv1.Secret:
+		// FIXME(kate-osborn): need to handle certificate rotation
+		el.cfg.SecretStore.Upsert(r)
 	default:
 		panic(fmt.Errorf("unknown resource type %T", e.Resource))
 	}
@@ -135,14 +145,17 @@ func (el *EventLoop) propagateUpsert(e *UpsertEvent) {
 func (el *EventLoop) propagateDelete(e *DeleteEvent) {
 	switch e.Type.(type) {
 	case *v1alpha2.GatewayClass:
-		el.processor.CaptureDeleteChange(e.Type, e.NamespacedName)
+		el.cfg.Processor.CaptureDeleteChange(e.Type, e.NamespacedName)
 	case *v1alpha2.Gateway:
-		el.processor.CaptureDeleteChange(e.Type, e.NamespacedName)
+		el.cfg.Processor.CaptureDeleteChange(e.Type, e.NamespacedName)
 	case *v1alpha2.HTTPRoute:
-		el.processor.CaptureDeleteChange(e.Type, e.NamespacedName)
+		el.cfg.Processor.CaptureDeleteChange(e.Type, e.NamespacedName)
 	case *apiv1.Service:
 		// FIXME(pleshakov): make sure the affected hosts are updated
-		el.serviceStore.Delete(e.NamespacedName)
+		el.cfg.ServiceStore.Delete(e.NamespacedName)
+	case *apiv1.Secret:
+		// FIXME(kate-osborn): make sure that affected servers are updated
+		el.cfg.SecretStore.Delete(e.NamespacedName)
 	default:
 		panic(fmt.Errorf("unknown resource type %T", e.Type))
 	}

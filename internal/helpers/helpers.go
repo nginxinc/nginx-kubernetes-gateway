@@ -41,3 +41,8 @@ func GetHeaderMatchTypePointer(t v1alpha2.HeaderMatchType) *v1alpha2.HeaderMatch
 func GetQueryParamMatchTypePointer(t v1alpha2.QueryParamMatchType) *v1alpha2.QueryParamMatchType {
 	return &t
 }
+
+// GetTLSModePointer takes a TLSModeType and returns a pointer to it. Useful in unit tests when initializing structs.
+func GetTLSModePointer(t v1alpha2.TLSModeType) *v1alpha2.TLSModeType {
+	return &t
+}

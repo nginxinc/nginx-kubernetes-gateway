@@ -33,3 +33,8 @@ type ServiceImpl interface {
 	Upsert(svc *apiv1.Service)
 	Remove(nsname types.NamespacedName)
 }
+
+type SecretImpl interface {
+	Upsert(secret *apiv1.Secret)
+	Remove(name types.NamespacedName)
+}

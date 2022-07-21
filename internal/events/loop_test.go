@@ -37,27 +37,43 @@ func (r *unsupportedResource) DeepCopyObject() runtime.Object {
 
 var _ = Describe("EventLoop", func() {
 	var (
-		fakeProcessor       *statefakes.FakeChangeProcessor
-		fakeServiceStore    *statefakes.FakeServiceStore
-		fakeGenerator       *configfakes.FakeGenerator
-		fakeNginxFimeMgr    *filefakes.FakeManager
-		fakeNginxRuntimeMgr *runtimefakes.FakeManager
-		fakeStatusUpdater   *statusfakes.FakeUpdater
-		cancel              context.CancelFunc
-		eventCh             chan interface{}
-		errorCh             chan error
-		start               func()
+		fakeProcessor           *statefakes.FakeChangeProcessor
+		fakeServiceStore        *statefakes.FakeServiceStore
+		fakeSecretStore         *statefakes.FakeSecretStore
+		fakeSecretMemoryManager *statefakes.FakeSecretDiskMemoryManager
+		fakeGenerator           *configfakes.FakeGenerator
+		fakeNginxFimeMgr        *filefakes.FakeManager
+		fakeNginxRuntimeMgr     *runtimefakes.FakeManager
+		fakeStatusUpdater       *statusfakes.FakeUpdater
+		cancel                  context.CancelFunc
+		eventCh                 chan interface{}
+		errorCh                 chan error
+		start                   func()
 	)
 
 	BeforeEach(func() {
 		fakeProcessor = &statefakes.FakeChangeProcessor{}
 		eventCh = make(chan interface{})
 		fakeServiceStore = &statefakes.FakeServiceStore{}
+		fakeSecretMemoryManager = &statefakes.FakeSecretDiskMemoryManager{}
+		fakeSecretStore = &statefakes.FakeSecretStore{}
 		fakeGenerator = &configfakes.FakeGenerator{}
 		fakeNginxFimeMgr = &filefakes.FakeManager{}
 		fakeNginxRuntimeMgr = &runtimefakes.FakeManager{}
 		fakeStatusUpdater = &statusfakes.FakeUpdater{}
-		ctrl := events.NewEventLoop(fakeProcessor, fakeServiceStore, fakeGenerator, eventCh, zap.New(), fakeNginxFimeMgr, fakeNginxRuntimeMgr, fakeStatusUpdater)
+
+		ctrl := events.NewEventLoop(events.EventLoopConfig{
+			Processor:           fakeProcessor,
+			ServiceStore:        fakeServiceStore,
+			SecretStore:         fakeSecretStore,
+			SecretMemoryManager: fakeSecretMemoryManager,
+			Generator:           fakeGenerator,
+			EventCh:             eventCh,
+			Logger:              zap.New(),
+			NginxFileMgr:        fakeNginxFimeMgr,
+			NginxRuntimeMgr:     fakeNginxRuntimeMgr,
+			StatusUpdater:       fakeStatusUpdater,
+		})
 
 		var ctx context.Context
 		ctx, cancel = context.WithCancel(context.Background())
@@ -182,6 +198,47 @@ var _ = Describe("EventLoop", func() {
 
 			Eventually(fakeServiceStore.DeleteCallCount).Should(Equal(1))
 			Expect(fakeServiceStore.DeleteArgsForCall(0)).Should(Equal(nsname))
+
+			Eventually(fakeProcessor.ProcessCallCount).Should(Equal(1))
+		})
+	})
+
+	Describe("Process Secret events", func() {
+		BeforeEach(func() {
+			go start()
+		})
+
+		AfterEach(func() {
+			cancel()
+
+			var err error
+			Eventually(errorCh).Should(Receive(&err))
+			Expect(err).To(BeNil())
+		})
+
+		It("should process upsert event", func() {
+			secret := &apiv1.Secret{}
+
+			eventCh <- &events.UpsertEvent{
+				Resource: secret,
+			}
+
+			Eventually(fakeSecretStore.UpsertCallCount).Should(Equal(1))
+			Expect(fakeSecretStore.UpsertArgsForCall(0)).Should(Equal(secret))
+
+			Eventually(fakeProcessor.ProcessCallCount).Should(Equal(1))
+		})
+
+		It("should process delete event", func() {
+			nsname := types.NamespacedName{Namespace: "test", Name: "secret"}
+
+			eventCh <- &events.DeleteEvent{
+				NamespacedName: nsname,
+				Type:           &apiv1.Secret{},
+			}
+
+			Eventually(fakeSecretStore.DeleteCallCount).Should(Equal(1))
+			Expect(fakeSecretStore.DeleteArgsForCall(0)).Should(Equal(nsname))
 
 			Eventually(fakeProcessor.ProcessCallCount).Should(Equal(1))
 		})

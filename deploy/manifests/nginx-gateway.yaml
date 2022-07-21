@@ -13,6 +13,7 @@ rules:
   - ""
   resources:
   - services
+  - secrets
   verbs:
   - list
   - watch
@@ -80,7 +81,7 @@ spec:
       initContainers:
       - image: busybox:1.34 # FIXME(pleshakov): use gateway container to init the Config with proper main config
         name: nginx-config-initializer
-        command: [ 'sh', '-c', 'echo "load_module /usr/lib/nginx/modules/ngx_http_js_module.so; events {}  pid /etc/nginx/nginx.pid; http { include /etc/nginx/conf.d/*.conf; js_import /usr/lib/nginx/modules/njs/httpmatches.js; server { default_type text/html; return 404; } }" > /etc/nginx/nginx.conf && mkdir /etc/nginx/conf.d && chown 1001:0 /etc/nginx/conf.d' ]
+        command: [ 'sh', '-c', 'echo "load_module /usr/lib/nginx/modules/ngx_http_js_module.so; events {}  pid /etc/nginx/nginx.pid; http { include /etc/nginx/conf.d/*.conf; js_import /usr/lib/nginx/modules/njs/httpmatches.js; }" > /etc/nginx/nginx.conf && mkdir /etc/nginx/conf.d /etc/nginx/secrets && chown 1001:0 /etc/nginx/conf.d /etc/nginx/secrets' ]
         volumeMounts:
         - name: nginx-config
           mountPath: /etc/nginx
@@ -105,6 +106,8 @@ spec:
         ports:
         - name: http
           containerPort: 80
+        - name: https
+          containerPort: 443
         volumeMounts:
         - name: nginx-config
           mountPath: /etc/nginx

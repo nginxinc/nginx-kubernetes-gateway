@@ -16,21 +16,6 @@ type gateway struct {
 	Listeners map[string]*listener
 }
 
-// listener represents a listener of the Gateway resource.
-// FIXME(pleshakov) For now, we only support HTTP listeners.
-type listener struct {
-	// Source holds the source of the listener from the Gateway resource.
-	Source v1alpha2.Listener
-	// Valid shows whether the listener is valid.
-	// FIXME(pleshakov) For now, only capture true/false without any error message.
-	Valid bool
-	// Routes holds the routes attached to the listener.
-	Routes map[types.NamespacedName]*route
-	// AcceptedHostnames is an intersection between the hostnames supported by the listener and the hostnames
-	// from the attached routes.
-	AcceptedHostnames map[string]struct{}
-}
-
 // route represents an HTTPRoute.
 type route struct {
 	// Source is the source resource of the route.
@@ -70,12 +55,17 @@ type graph struct {
 }
 
 // buildGraph builds a graph from a store assuming that the Gateway resource has the gwNsName namespace and name.
-func buildGraph(store *store, controllerName string, gcName string) *graph {
+func buildGraph(
+	store *store,
+	controllerName string,
+	gcName string,
+	secretMemoryMgr SecretDiskMemoryManager,
+) *graph {
 	gc := buildGatewayClass(store.gc, controllerName)
 
 	gw, ignoredGws := processGateways(store.gateways, gcName)
 
-	listeners := buildListeners(gw, gcName)
+	listeners := buildListeners(gw, gcName, secretMemoryMgr)
 
 	routes := make(map[types.NamespacedName]*route)
 	for _, ghr := range store.httpRoutes {
@@ -149,6 +139,23 @@ func buildGatewayClass(gc *v1alpha2.GatewayClass, controllerName string) *gatewa
 		Valid:    err == nil,
 		ErrorMsg: errorMsg,
 	}
+}
+
+func buildListeners(gw *v1alpha2.Gateway, gcName string, secretMemoryMgr SecretDiskMemoryManager) map[string]*listener {
+	listeners := make(map[string]*listener)
+
+	if gw == nil || string(gw.Spec.GatewayClassName) != gcName {
+		return listeners
+	}
+
+	listenerFactory := newListenerConfiguratorFactory(gw, secretMemoryMgr)
+
+	for _, gl := range gw.Spec.Listeners {
+		configurator := listenerFactory.getConfiguratorForListener(gl)
+		listeners[string(gl.Name)] = configurator.configure(gl)
+	}
+
+	return listeners
 }
 
 // bindHTTPRouteToListeners tries to bind an HTTPRoute to listener.
@@ -275,46 +282,6 @@ func findAcceptedHostnames(listenerHostname *v1alpha2.Hostname, routeHostnames [
 	}
 
 	return result
-}
-
-func buildListeners(gw *v1alpha2.Gateway, gcName string) map[string]*listener {
-	// FIXME(pleshakov): For now we require that all HTTP listeners bind to port 80
-	listeners := make(map[string]*listener)
-
-	if gw == nil || string(gw.Spec.GatewayClassName) != gcName {
-		return listeners
-	}
-
-	usedListenerHostnames := make(map[string]*listener)
-
-	for _, gl := range gw.Spec.Listeners {
-		valid := validateListener(gl)
-
-		h := getHostname(gl.Hostname)
-
-		// FIXME(pleshakov) This check will need to be done per each port once we support multiple ports.
-		if holder, exist := usedListenerHostnames[h]; exist {
-			valid = false
-			holder.Valid = false // all listeners for the same hostname become conflicted
-		}
-
-		l := &listener{
-			Source:            gl,
-			Valid:             valid,
-			Routes:            make(map[types.NamespacedName]*route),
-			AcceptedHostnames: make(map[string]struct{}),
-		}
-
-		listeners[string(gl.Name)] = l
-		usedListenerHostnames[h] = l
-	}
-
-	return listeners
-}
-
-func validateListener(listener v1alpha2.Listener) bool {
-	// FIXME(pleshakov) For now, only support HTTP on port 80.
-	return listener.Protocol == v1alpha2.HTTPProtocolType && listener.Port == 80
 }
 
 func getHostname(h *v1alpha2.Hostname) string {

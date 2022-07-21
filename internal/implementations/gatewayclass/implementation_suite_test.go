@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func TestState(t *testing.T) {
+func TestGatewayClassImplementation(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Implementation Suite")
+	RunSpecs(t, "Gateway Class Implementation Suite")
 }

@@ -40,11 +40,26 @@ func NewGeneratorImpl(serviceStore state.ServiceStore) *GeneratorImpl {
 func (g *GeneratorImpl) Generate(conf state.Configuration) ([]byte, Warnings) {
 	warnings := newWarnings()
 
+	confServers := append(conf.HTTPServers, conf.SSLServers...)
+
 	servers := httpServers{
-		Servers: make([]server, 0, len(conf.HTTPServers)),
+		// capacity is all the conf servers + default ssl & http servers
+		Servers: make([]server, 0, len(confServers)+2),
 	}
 
-	for _, s := range conf.HTTPServers {
+	if len(conf.HTTPServers) > 0 {
+		defaultHTTPServer := generateDefaultHTTPServer()
+
+		servers.Servers = append(servers.Servers, defaultHTTPServer)
+	}
+
+	if len(conf.SSLServers) > 0 {
+		defaultSSLServer := generateDefaultSSLServer()
+
+		servers.Servers = append(servers.Servers, defaultSSLServer)
+	}
+
+	for _, s := range confServers {
 		cfg, warns := generate(s, g.serviceStore)
 
 		servers.Servers = append(servers.Servers, cfg)
@@ -54,12 +69,20 @@ func (g *GeneratorImpl) Generate(conf state.Configuration) ([]byte, Warnings) {
 	return g.executor.ExecuteForHTTPServers(servers), warnings
 }
 
-func generate(httpServer state.HTTPServer, serviceStore state.ServiceStore) (server, Warnings) {
+func generateDefaultSSLServer() server {
+	return server{IsDefaultSSL: true}
+}
+
+func generateDefaultHTTPServer() server {
+	return server{IsDefaultHTTP: true}
+}
+
+func generate(virtualServer state.VirtualServer, serviceStore state.ServiceStore) (server, Warnings) {
 	warnings := newWarnings()
 
-	locs := make([]location, 0, len(httpServer.PathRules)) // FIXME(pleshakov): expand with rule.Routes
+	locs := make([]location, 0, len(virtualServer.PathRules)) // FIXME(pleshakov): expand with rule.Routes
 
-	for _, rule := range httpServer.PathRules {
+	for _, rule := range virtualServer.PathRules {
 		matches := make([]httpMatch, 0, len(rule.MatchRules))
 
 		for ruleIdx, r := range rule.MatchRules {
@@ -102,11 +125,17 @@ func generate(httpServer state.HTTPServer, serviceStore state.ServiceStore) (ser
 			locs = append(locs, pathLoc)
 		}
 	}
-
-	return server{
-		ServerName: httpServer.Hostname,
+	s := server{
+		ServerName: virtualServer.Hostname,
 		Locations:  locs,
-	}, warnings
+	}
+	if virtualServer.SSL != nil {
+		s.SSL = &ssl{
+			Certificate:    virtualServer.SSL.CertificatePath,
+			CertificateKey: virtualServer.SSL.CertificatePath,
+		}
+	}
+	return s, warnings
 }
 
 func generateProxyPass(address string) string {

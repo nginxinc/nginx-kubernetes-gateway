@@ -118,7 +118,7 @@ var _ = Describe("Updater", func() {
 								Status:             status,
 								ObservedGeneration: generation,
 								LastTransitionTime: fakeClockTime,
-								Reason:             string(v1alpha2.GatewayClassReasonAccepted),
+								Reason:             reason,
 								Message:            msg,
 							},
 						},

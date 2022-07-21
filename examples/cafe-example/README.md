@@ -39,6 +39,12 @@ In this example we deploy NGINX Kubernetes Gateway, a simple web application, an
 
 ## 3. Configure Routing
 
+1. Create the `Gateway`:
+
+   ```
+   kubectl apply -f gateway.yaml
+   ```
+
 1. Create the `HTTPRoute` resources:
 
    ```

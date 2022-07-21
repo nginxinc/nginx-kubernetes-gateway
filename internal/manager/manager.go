@@ -15,6 +15,7 @@ import (
 	gw "github.com/nginxinc/nginx-kubernetes-gateway/internal/implementations/gateway"
 	gc "github.com/nginxinc/nginx-kubernetes-gateway/internal/implementations/gatewayclass"
 	hr "github.com/nginxinc/nginx-kubernetes-gateway/internal/implementations/httproute"
+	secret "github.com/nginxinc/nginx-kubernetes-gateway/internal/implementations/secret"
 	svc "github.com/nginxinc/nginx-kubernetes-gateway/internal/implementations/service"
 	ngxcfg "github.com/nginxinc/nginx-kubernetes-gateway/internal/nginx/config"
 	"github.com/nginxinc/nginx-kubernetes-gateway/internal/nginx/file"
@@ -24,8 +25,13 @@ import (
 	"github.com/nginxinc/nginx-kubernetes-gateway/pkg/sdk"
 )
 
-// clusterTimeout is a timeout for connections to the Kubernetes API
-const clusterTimeout = 10 * time.Second
+const (
+	// clusterTimeout is a timeout for connections to the Kubernetes API
+	clusterTimeout = 10 * time.Second
+	// secretsFolder is the folder that holds all the secrets for NGINX servers.
+	// nolint:gosec
+	secretsFolder = "/etc/nginx/secrets"
+)
 
 var scheme = runtime.NewScheme()
 
@@ -68,11 +74,20 @@ func Start(cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("cannot register service implementation: %w", err)
 	}
+	err = sdk.RegisterSecretController(mgr, secret.NewSecretImplementation(cfg, eventCh))
+	if err != nil {
+		return fmt.Errorf("cannot register secret implementation: %w", err)
+	}
+
+	secretStore := state.NewSecretStore()
+	secretMemoryMgr := state.NewSecretDiskMemoryManager(secretsFolder, secretStore)
 
 	processor := state.NewChangeProcessorImpl(state.ChangeProcessorConfig{
-		GatewayCtlrName:  cfg.GatewayCtlrName,
-		GatewayClassName: cfg.GatewayClassName,
+		GatewayCtlrName:     cfg.GatewayCtlrName,
+		GatewayClassName:    cfg.GatewayClassName,
+		SecretMemoryManager: secretMemoryMgr,
 	})
+
 	serviceStore := state.NewServiceStore()
 	configGenerator := ngxcfg.NewGeneratorImpl(serviceStore)
 	nginxFileMgr := file.NewManagerImpl()
@@ -87,7 +102,19 @@ func Start(cfg config.Config) error {
 		Logger: cfg.Logger.WithName("statusUpdater"),
 		Clock:  status.NewRealClock(),
 	})
-	eventLoop := events.NewEventLoop(processor, serviceStore, configGenerator, eventCh, cfg.Logger, nginxFileMgr, nginxRuntimeMgr, statusUpdater)
+
+	eventLoop := events.NewEventLoop(events.EventLoopConfig{
+		Processor:           processor,
+		ServiceStore:        serviceStore,
+		SecretStore:         secretStore,
+		SecretMemoryManager: secretMemoryMgr,
+		Generator:           configGenerator,
+		EventCh:             eventCh,
+		Logger:              cfg.Logger.WithName("eventLoop"),
+		NginxFileMgr:        nginxFileMgr,
+		NginxRuntimeMgr:     nginxRuntimeMgr,
+		StatusUpdater:       statusUpdater,
+	})
 
 	err = mgr.Add(eventLoop)
 	if err != nil {

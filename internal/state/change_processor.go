@@ -37,6 +37,8 @@ type ChangeProcessorConfig struct {
 	GatewayCtlrName string
 	// GatewayClassName is the name of the GatewayClass resource.
 	GatewayClassName string
+	// SecretMemoryManager is the secret memory manager.
+	SecretMemoryManager SecretDiskMemoryManager
 }
 
 type ChangeProcessorImpl struct {
@@ -127,7 +129,12 @@ func (c *ChangeProcessorImpl) Process() (changed bool, conf Configuration, statu
 
 	c.changed = false
 
-	graph := buildGraph(c.store, c.cfg.GatewayCtlrName, c.cfg.GatewayClassName)
+	graph := buildGraph(
+		c.store,
+		c.cfg.GatewayCtlrName,
+		c.cfg.GatewayClassName,
+		c.cfg.SecretMemoryManager,
+	)
 
 	conf = buildConfiguration(graph)
 	statuses = buildStatuses(graph)

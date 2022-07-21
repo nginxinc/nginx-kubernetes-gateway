@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -18,21 +19,89 @@ import (
 func TestGenerateForHost(t *testing.T) {
 	generator := NewGeneratorImpl(&statefakes.FakeServiceStore{})
 
-	conf := state.Configuration{
-		HTTPServers: []state.HTTPServer{
-			{
-				Hostname: "example.com",
+	testcases := []struct {
+		conf        state.Configuration
+		httpDefault bool
+		sslDefault  bool
+		msg         string
+	}{
+		{
+			conf:        state.Configuration{},
+			httpDefault: false,
+			sslDefault:  false,
+			msg:         "no servers",
+		},
+		{
+			conf: state.Configuration{
+				HTTPServers: []state.VirtualServer{
+					{
+						Hostname: "example.com",
+					},
+				},
 			},
+			httpDefault: true,
+			sslDefault:  false,
+			msg:         "only HTTP servers",
+		},
+		{
+			conf: state.Configuration{
+				SSLServers: []state.VirtualServer{
+					{
+						Hostname: "example.com",
+					},
+				},
+			},
+			httpDefault: false,
+			sslDefault:  true,
+			msg:         "only HTTPS servers",
+		},
+		{
+			conf: state.Configuration{
+				HTTPServers: []state.VirtualServer{
+					{
+						Hostname: "example.com",
+					},
+				},
+				SSLServers: []state.VirtualServer{
+					{
+						Hostname: "example.com",
+					},
+				},
+			},
+			httpDefault: true,
+			sslDefault:  true,
+			msg:         "both HTTP and HTTPS servers",
 		},
 	}
 
-	cfg, warnings := generator.Generate(conf)
+	for _, tc := range testcases {
+		cfg, warnings := generator.Generate(tc.conf)
 
-	if len(cfg) == 0 {
-		t.Errorf("Generate() generated empty config")
-	}
-	if len(warnings) > 0 {
-		t.Errorf("Generate() returned unexpected warnings: %v", warnings)
+		defaultSSLExists := strings.Contains(string(cfg), "listen 443 ssl default_server")
+		defaultHTTPExists := strings.Contains(string(cfg), "listen 80 default_server")
+
+		if tc.sslDefault && !defaultSSLExists {
+			t.Errorf("Generate() did not generate a config with a default TLS termination server for test: %q", tc.msg)
+		}
+
+		if !tc.sslDefault && defaultSSLExists {
+			t.Errorf("Generate() generated a config with a default TLS termination server for test: %q", tc.msg)
+		}
+
+		if tc.httpDefault && !defaultHTTPExists {
+			t.Errorf("Generate() did not generate a config with a default http server for test: %q", tc.msg)
+		}
+
+		if !tc.httpDefault && defaultHTTPExists {
+			t.Errorf("Generate() generated a config with a default http server for test: %q", tc.msg)
+		}
+
+		if len(cfg) == 0 {
+			t.Errorf("Generate() generated empty config for test: %q", tc.msg)
+		}
+		if len(warnings) > 0 {
+			t.Errorf("Generate() returned unexpected warnings: %v for test: %q", warnings, tc.msg)
+		}
 	}
 }
 
@@ -143,7 +212,9 @@ func TestGenerate(t *testing.T) {
 		},
 	}
 
-	host := state.HTTPServer{
+	certPath := "/etc/nginx/secrets/cert"
+
+	httpHost := state.VirtualServer{
 		Hostname: "example.com",
 		PathRules: []state.PathRule{
 			{
@@ -189,6 +260,9 @@ func TestGenerate(t *testing.T) {
 		},
 	}
 
+	httpsHost := httpHost
+	httpsHost.SSL = &state.SSL{CertificatePath: certPath}
+
 	fakeServiceStore := &statefakes.FakeServiceStore{}
 	fakeServiceStore.ResolveReturns("10.0.0.1", nil)
 
@@ -216,7 +290,7 @@ func TestGenerate(t *testing.T) {
 
 	const backendAddr = "http://10.0.0.1:80"
 
-	expected := server{
+	expectedHTTPServer := server{
 		ServerName: "example.com",
 		Locations: []location{
 			{
@@ -253,17 +327,43 @@ func TestGenerate(t *testing.T) {
 			},
 		},
 	}
+
+	expectedHTTPSServer := expectedHTTPServer
+	expectedHTTPSServer.SSL = &ssl{Certificate: certPath, CertificateKey: certPath}
+
 	expectedWarnings := Warnings{
 		hr: []string{"empty backend refs"},
 	}
 
-	result, warnings := generate(host, fakeServiceStore)
-
-	if diff := cmp.Diff(expected, result); diff != "" {
-		t.Errorf("generate() mismatch (-want +got):\n%s", diff)
+	testcases := []struct {
+		host        state.VirtualServer
+		expWarnings Warnings
+		expResult   server
+		msg         string
+	}{
+		{
+			host:        httpHost,
+			expWarnings: expectedWarnings,
+			expResult:   expectedHTTPServer,
+			msg:         "http server",
+		},
+		{
+			host:        httpsHost,
+			expWarnings: expectedWarnings,
+			expResult:   expectedHTTPSServer,
+			msg:         "https server",
+		},
 	}
-	if diff := cmp.Diff(expectedWarnings, warnings); diff != "" {
-		t.Errorf("generate() mismatch on warnings (-want +got):\n%s", diff)
+
+	for _, tc := range testcases {
+		result, warnings := generate(tc.host, fakeServiceStore)
+
+		if diff := cmp.Diff(tc.expResult, result); diff != "" {
+			t.Errorf("generate() mismatch (-want +got):\n%s", diff)
+		}
+		if diff := cmp.Diff(tc.expWarnings, warnings); diff != "" {
+			t.Errorf("generate() mismatch on warnings (-want +got):\n%s", diff)
+		}
 	}
 }
 
