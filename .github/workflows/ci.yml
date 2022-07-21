@@ -170,7 +170,6 @@ jobs:
         with:
           images: |
             name=ghcr.io/nginxinc/nginx-kubernetes-gateway
-            name=nginx/nginx-kubernetes-gateway
           tags: |
             type=semver,pattern={{version}}
             type=sha
@@ -193,7 +192,7 @@ jobs:
         uses: aquasecurity/trivy-action@0.2.3
         continue-on-error: true
         with:
-          image-ref: ghcr.io/nginxinc/nginx-kubernetes-gateway:${{ steps.meta.outputs.tags }}
+          image-ref: ghcr.io/nginxinc/nginx-kubernetes-gateway:${{ steps.meta.outputs.version }}
           format: 'template'
           template: '@/contrib/sarif.tpl'
           output: 'trivy-results-nginx-kubernetes-gateway.sarif'
