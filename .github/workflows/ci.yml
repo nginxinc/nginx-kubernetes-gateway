@@ -171,7 +171,7 @@ jobs:
             GIT_COMMIT=${{ needs.vars.outputs.sha }}
             DATE=${{ needs.vars.outputs.date }}
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.2.3
+        uses: aquasecurity/trivy-action@0.6.0
         continue-on-error: true
         with:
           image-ref: nginx/nginx-kubernetes-gateway:${{ needs.vars.outputs.sha }}
